@@ -353,8 +353,109 @@ validate_username() {
     return 0
 }
 
+# Validate IP address format and content
+validate_ip_address() {
+    local ip="$1"
+    local description="$2"
+
+    # Check if CIDR notation is present
+    if ! echo "$ip" | grep -q '/'; then
+        log_error "$description must include CIDR notation (e.g., '10.0.0.5/32')"
+        log_error "Provided: $ip"
+        return 1
+    fi
+
+    # Split IP and CIDR
+    local ip_only="${ip%/*}"
+    local cidr_suffix="${ip#*/}"
+
+    # Validate IPv4 format using regex
+    if ! echo "$ip_only" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+        log_error "$description has invalid IPv4 format: $ip_only"
+        log_error "Expected format: xxx.xxx.xxx.xxx/xx"
+        return 1
+    fi
+
+    # Validate each octet is 0-255
+    local IFS='.'
+    local octet_count=0
+    for octet in $ip_only; do
+        octet_count=$((octet_count + 1))
+
+        # Check for leading zeros (except single zero)
+        if [ "$octet" != "0" ] && echo "$octet" | grep -q '^0'; then
+            log_error "$description has invalid octet with leading zero: $octet"
+            return 1
+        fi
+
+        # Check numeric range
+        if ! echo "$octet" | grep -qE '^[0-9]+$' || [ "$octet" -gt 255 ] 2>/dev/null || [ "$octet" -lt 0 ] 2>/dev/null; then
+            log_error "$description has invalid IPv4 octet: $octet (must be 0-255)"
+            return 1
+        fi
+    done
+
+    # Ensure exactly 4 octets
+    if [ "$octet_count" -ne 4 ]; then
+        log_error "$description must have exactly 4 octets, found: $octet_count"
+        return 1
+    fi
+
+    # Validate CIDR suffix
+    if ! echo "$cidr_suffix" | grep -qE '^[0-9]+$' || [ "$cidr_suffix" -gt 32 ] || [ "$cidr_suffix" -lt 0 ]; then
+        log_error "$description has invalid CIDR suffix: /$cidr_suffix (must be 0-32)"
+        return 1
+    fi
+
+    # Check for reserved/problematic addresses and reject them
+    case "$ip_only" in
+        "0.0.0.0")
+            log_error "$description cannot use network address: $ip_only"
+            return 1
+            ;;
+        "255.255.255.255")
+            log_error "$description cannot use broadcast address: $ip_only"
+            return 1
+            ;;
+        127.*)
+            log_error "$description cannot use loopback address: $ip_only"
+            log_error "Loopback addresses (127.x.x.x) are reserved for local host"
+            return 1
+            ;;
+        169.254.*)
+            log_error "$description cannot use link-local address: $ip_only"
+            log_error "Link-local addresses (169.254.x.x) are auto-assigned and should not be used"
+            return 1
+            ;;
+        224.*|225.*|226.*|227.*|228.*|229.*|230.*|231.*|232.*|233.*|234.*|235.*|236.*|237.*|238.*|239.*)
+            log_error "$description cannot use multicast address: $ip_only"
+            log_error "Multicast addresses (224.0.0.0-239.255.255.255) are reserved"
+            return 1
+            ;;
+        240.*|241.*|242.*|243.*|244.*|245.*|246.*|247.*|248.*|249.*|250.*|251.*|252.*|253.*|254.*|255.*)
+            log_error "$description cannot use reserved address: $ip_only"
+            log_error "Addresses 240.0.0.0-255.255.255.255 are reserved for future use"
+            return 1
+            ;;
+    esac
+
+    # Additional checks for common mistakes
+    if [ "$cidr_suffix" -eq 0 ]; then
+        log_warning "$description uses /0 CIDR which routes all traffic (0.0.0.0/0)"
+    elif [ "$cidr_suffix" -lt 8 ]; then
+        log_warning "$description uses very broad CIDR /$cidr_suffix - ensure this is intentional"
+    fi
+
+    return 0
+}
+
 # Validate the username
 if ! validate_username "$USER_NAME"; then
+    exit 1
+fi
+
+# Validate the client IP address
+if ! validate_ip_address "$CLIENT_IP" "Client IP address"; then
     exit 1
 fi
 
