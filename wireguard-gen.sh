@@ -313,6 +313,51 @@ if [ -z "$CONFIG_NAME" ] || [ -z "$USER_NAME" ] || [ -z "$CLIENT_IP" ] || [ -z "
     usage
 fi
 
+# Validate username for security (prevent path traversal)
+validate_username() {
+    local username="$1"
+
+    # Check for path traversal characters
+    if echo "$username" | grep -q '[/\\]'; then
+        log_error "Username contains invalid path characters: $username"
+        log_error "Usernames cannot contain '/' or '\\' characters for security reasons"
+        return 1
+    fi
+
+    # Check for directory traversal patterns
+    if echo "$username" | grep -q '\.\.'; then
+        log_error "Username contains directory traversal pattern: $username"
+        log_error "Usernames cannot contain '..' for security reasons"
+        return 1
+    fi
+
+    # Check for other problematic characters
+    if echo "$username" | grep -q '[<>:"|?*]'; then
+        log_error "Username contains invalid characters: $username"
+        log_error "Usernames cannot contain: < > : \" | ? *"
+        return 1
+    fi
+
+    # Check length
+    if [ ${#username} -gt 64 ]; then
+        log_error "Username too long (max 64 characters): ${#username}"
+        return 1
+    fi
+
+    # Check starts with valid character
+    if echo "$username" | grep -qE '^[.-]'; then
+        log_error "Username cannot start with '.' or '-'"
+        return 1
+    fi
+
+    return 0
+}
+
+# Validate the username
+if ! validate_username "$USER_NAME"; then
+    exit 1
+fi
+
 SERVER_CONFIG="/etc/wireguard/${CONFIG_NAME}.conf"
 CLIENT_CONFIG="${OUTPUT_DIR}/${USER_NAME}.conf"
 
