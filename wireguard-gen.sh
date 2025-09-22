@@ -584,11 +584,66 @@ if ! validate_ip_address "$CLIENT_IP" "Client IP address"; then
     exit 1
 fi
 
+# Validate output directory and file paths
+validate_output_paths() {
+    local output_dir="$1"
+    local username="$2"
+
+    # Check OUTPUT_DIR length
+    if [ ${#output_dir} -gt 4000 ]; then
+        log_error "Output directory path too long: ${#output_dir} characters (max 4000)"
+        return 1
+    fi
+
+    # Check for basic path traversal in OUTPUT_DIR
+    if echo "$output_dir" | grep -q '\.\.'; then
+        log_error "Output directory contains '..' pattern: $output_dir"
+        log_error "Please use absolute paths or relative paths without '..' for security"
+        return 1
+    fi
+
+
+    # Generate full file paths
+    local client_config_path="${output_dir}/${username}.conf"
+    local qr_code_path="${output_dir}/${username}.png"
+
+    # Check total path lengths
+    if [ ${#client_config_path} -gt 4096 ]; then
+        log_error "Client config path too long: ${#client_config_path} characters (max 4096)"
+        log_error "Path: $client_config_path"
+        return 1
+    fi
+
+    if [ ${#qr_code_path} -gt 4096 ]; then
+        log_error "QR code path too long: ${#qr_code_path} characters (max 4096)"
+        log_error "Path: $qr_code_path"
+        return 1
+    fi
+
+    # Check if files already exist and warn
+    if [ -f "$client_config_path" ]; then
+        log_warning "Client config file already exists: $client_config_path"
+        log_warning "This file will be overwritten if you continue"
+    fi
+
+    if [ -f "$qr_code_path" ]; then
+        log_warning "QR code file already exists: $qr_code_path"
+        log_warning "This file will be overwritten if you continue"
+    fi
+
+    return 0
+}
+
 # Validate server endpoint if provided by user
 if [ -n "$SERVER_ENDPOINT" ]; then
     if ! validate_server_endpoint "$SERVER_ENDPOINT"; then
         exit 1
     fi
+fi
+
+# Validate output directory and file paths
+if ! validate_output_paths "$OUTPUT_DIR" "$USER_NAME"; then
+    exit 1
 fi
 
 SERVER_CONFIG="/etc/wireguard/${CONFIG_NAME}.conf"
