@@ -484,11 +484,6 @@ validate_ip_address() {
     return 0
 }
 
-# Validate the username
-if ! validate_username "$USER_NAME"; then
-    exit 1
-fi
-
 # Validate server endpoint format
 validate_server_endpoint() {
     local endpoint="$1"
@@ -579,11 +574,6 @@ validate_server_endpoint() {
     return 0
 }
 
-# Validate the client IP address
-if ! validate_ip_address "$CLIENT_IP" "Client IP address"; then
-    exit 1
-fi
-
 # Validate output directory and file paths
 validate_output_paths() {
     local output_dir="$1"
@@ -634,15 +624,86 @@ validate_output_paths() {
     return 0
 }
 
-# Validate server endpoint if provided by user
-if [ -n "$SERVER_ENDPOINT" ]; then
-    if ! validate_server_endpoint "$SERVER_ENDPOINT"; then
-        exit 1
-    fi
-fi
+# Comprehensive input validation function that coordinates all validations
+validate_all_inputs() {
+    local config_name="$1"
+    local user_name="$2"
+    local client_ip="$3"
+    local output_dir="$4"
+    local server_endpoint="$5"
 
-# Validate output directory and file paths
-if ! validate_output_paths "$OUTPUT_DIR" "$USER_NAME"; then
+    log_info "Performing comprehensive input validation..."
+
+    local validation_errors=0
+
+    # Validate config name
+    if [ -z "$config_name" ]; then
+        log_error "Configuration name is required"
+        validation_errors=$((validation_errors + 1))
+    else
+        # Basic config name validation
+        if ! echo "$config_name" | grep -qE '^[a-zA-Z0-9_-]+$'; then
+            log_error "Configuration name contains invalid characters: $config_name"
+            log_error "Only allowed: a-z, A-Z, 0-9, underscore (_), hyphen (-)"
+            validation_errors=$((validation_errors + 1))
+        fi
+
+        if [ ${#config_name} -gt 15 ]; then
+            log_error "Configuration name too long (max 15 characters): ${#config_name}"
+            validation_errors=$((validation_errors + 1))
+        fi
+    fi
+
+    # Validate username
+    if [ -z "$user_name" ]; then
+        log_error "Username is required"
+        validation_errors=$((validation_errors + 1))
+    else
+        if ! validate_username "$user_name"; then
+            validation_errors=$((validation_errors + 1))
+        fi
+    fi
+
+    # Validate client IP
+    if [ -z "$client_ip" ]; then
+        log_error "Client IP address is required"
+        validation_errors=$((validation_errors + 1))
+    else
+        if ! validate_ip_address "$client_ip" "Client IP address"; then
+            validation_errors=$((validation_errors + 1))
+        fi
+    fi
+
+    # Validate output directory
+    if [ -z "$output_dir" ]; then
+        log_error "Output directory is required"
+        validation_errors=$((validation_errors + 1))
+    else
+        if ! validate_output_paths "$output_dir" "$user_name"; then
+            validation_errors=$((validation_errors + 1))
+        fi
+    fi
+
+    # Validate server endpoint if provided
+    if [ -n "$server_endpoint" ]; then
+        if ! validate_server_endpoint "$server_endpoint"; then
+            validation_errors=$((validation_errors + 1))
+        fi
+    fi
+
+    # Summary
+    if [ $validation_errors -eq 0 ]; then
+        log_success "All input validations passed!"
+        return 0
+    else
+        log_error "Input validation failed with $validation_errors error(s)"
+        log_error "Please fix the above issues and try again"
+        return 1
+    fi
+}
+
+# Perform comprehensive input validation
+if ! validate_all_inputs "$CONFIG_NAME" "$USER_NAME" "$CLIENT_IP" "$OUTPUT_DIR" "$SERVER_ENDPOINT"; then
     exit 1
 fi
 
