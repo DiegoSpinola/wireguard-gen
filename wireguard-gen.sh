@@ -489,9 +489,106 @@ if ! validate_username "$USER_NAME"; then
     exit 1
 fi
 
+# Validate server endpoint format
+validate_server_endpoint() {
+    local endpoint="$1"
+
+    if [ -z "$endpoint" ]; then
+        return 0  # Optional parameter, will be auto-detected
+    fi
+
+    # Split host and port
+    local host="${endpoint%:*}"
+    local port="${endpoint##*:}"
+
+    # Check if port was actually specified (host:port format required)
+    if [ "$host" = "$port" ] || [ -z "$port" ]; then
+        log_error "Server endpoint must include port in format 'host:port'"
+        log_error "Examples: 'vpn.example.com:51820' or '192.168.1.1:51820'"
+        log_error "Provided: $endpoint"
+        return 1
+    fi
+
+    # Validate port number
+    if ! echo "$port" | grep -qE '^[0-9]+$'; then
+        log_error "Server endpoint port must be numeric: $port"
+        return 1
+    fi
+
+    if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        log_error "Server endpoint port out of range: $port (must be 1-65535)"
+        return 1
+    fi
+
+    # Validate host length
+    if [ ${#host} -gt 253 ]; then
+        log_error "Server hostname too long: ${#host} characters (max 253)"
+        return 1
+    fi
+
+    if [ ${#host} -lt 1 ]; then
+        log_error "Server hostname cannot be empty"
+        return 1
+    fi
+
+    # Check if host is an IPv4 address
+    if echo "$host" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+        # Validate as IPv4 address
+        local IFS='.'
+        for octet in $host; do
+            if ! echo "$octet" | grep -qE '^[0-9]+$' || [ "$octet" -gt 255 ] || [ "$octet" -lt 0 ]; then
+                log_error "Server endpoint has invalid IPv4 address: $host"
+                return 1
+            fi
+        done
+        log_info "Server endpoint uses IPv4 address: $host:$port"
+    else
+        # Validate as hostname
+        if ! echo "$host" | grep -qE '^[a-zA-Z0-9.-]+$'; then
+            log_error "Server hostname contains invalid characters: $host"
+            log_error "Only allowed: a-z, A-Z, 0-9, period (.), hyphen (-)"
+            return 1
+        fi
+
+        # Check for proper hostname format (no leading/trailing dots or hyphens)
+        if echo "$host" | grep -qE '^[.-]|[.-]$'; then
+            log_error "Server hostname cannot start or end with '.' or '-': $host"
+            return 1
+        fi
+
+        # Check for consecutive dots or hyphens
+        if echo "$host" | grep -qE '[.-]{2,}'; then
+            log_error "Server hostname cannot have consecutive '.' or '-': $host"
+            return 1
+        fi
+
+        # Check DNS resolvability (non-blocking)
+        if command -v nslookup >/dev/null 2>&1; then
+            if ! nslookup "$host" >/dev/null 2>&1; then
+                log_warning "Server hostname '$host' could not be resolved via DNS"
+                log_warning "This may cause connection issues - verify hostname is correct"
+            fi
+        elif command -v dig >/dev/null 2>&1; then
+            if ! dig "$host" >/dev/null 2>&1; then
+                log_warning "Server hostname '$host' could not be resolved via DNS"
+                log_warning "This may cause connection issues - verify hostname is correct"
+            fi
+        fi
+    fi
+
+    return 0
+}
+
 # Validate the client IP address
 if ! validate_ip_address "$CLIENT_IP" "Client IP address"; then
     exit 1
+fi
+
+# Validate server endpoint if provided by user
+if [ -n "$SERVER_ENDPOINT" ]; then
+    if ! validate_server_endpoint "$SERVER_ENDPOINT"; then
+        exit 1
+    fi
 fi
 
 SERVER_CONFIG="/etc/wireguard/${CONFIG_NAME}.conf"
@@ -580,6 +677,12 @@ if [ -z "$SERVER_ENDPOINT" ]; then
 
     SERVER_ENDPOINT="${SERVER_PUBLIC_IP}:${LISTEN_PORT}"
     log_info "Using server endpoint: $SERVER_ENDPOINT"
+
+    # Validate auto-detected endpoint
+    if ! validate_server_endpoint "$SERVER_ENDPOINT"; then
+        log_error "Auto-detected server endpoint is invalid. Please provide a valid endpoint with -e option."
+        exit 1
+    fi
 fi
 
 BACKUP_FILE="${BACKUP_CONFIGS_DIR}/${CONFIG_NAME}.conf.$(date +%Y%m%d_%H%M%S).backup"
