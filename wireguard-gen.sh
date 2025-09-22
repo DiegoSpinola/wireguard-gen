@@ -313,41 +313,76 @@ if [ -z "$CONFIG_NAME" ] || [ -z "$USER_NAME" ] || [ -z "$CLIENT_IP" ] || [ -z "
     usage
 fi
 
-# Validate username for security (prevent path traversal)
+# Validate username for security and usability
 validate_username() {
     local username="$1"
 
-    # Check for path traversal characters
-    if echo "$username" | grep -q '[/\\]'; then
-        log_error "Username contains invalid path characters: $username"
-        log_error "Usernames cannot contain '/' or '\\' characters for security reasons"
+    # Check length first
+    if [ ${#username} -lt 1 ]; then
+        log_error "Username cannot be empty"
         return 1
     fi
 
-    # Check for directory traversal patterns
-    if echo "$username" | grep -q '\.\.'; then
-        log_error "Username contains directory traversal pattern: $username"
-        log_error "Usernames cannot contain '..' for security reasons"
+    if [ ${#username} -gt 32 ]; then
+        log_error "Username too long (max 32 characters): ${#username}"
+        log_error "Current length: ${#username} characters"
         return 1
     fi
 
-    # Check for other problematic characters
-    if echo "$username" | grep -q '[<>:"|?*]'; then
+    # Check for valid characters only (alphanumeric, period, underscore, hyphen)
+    if ! echo "$username" | grep -qE '^[a-zA-Z0-9._-]+$'; then
         log_error "Username contains invalid characters: $username"
-        log_error "Usernames cannot contain: < > : \" | ? *"
+        log_error "Only allowed: a-z, A-Z, 0-9, period (.), underscore (_), hyphen (-)"
+        log_error "Spaces and special characters are not allowed"
         return 1
     fi
 
-    # Check length
-    if [ ${#username} -gt 64 ]; then
-        log_error "Username too long (max 64 characters): ${#username}"
+    # Check starts with alphanumeric character
+    if ! echo "$username" | grep -qE '^[a-zA-Z0-9]'; then
+        log_error "Username must start with a letter or number: $username"
+        log_error "Cannot start with: . _ -"
         return 1
     fi
 
-    # Check starts with valid character
-    if echo "$username" | grep -qE '^[.-]'; then
-        log_error "Username cannot start with '.' or '-'"
+    # Check ends with alphanumeric character
+    if ! echo "$username" | grep -qE '[a-zA-Z0-9]$'; then
+        log_error "Username must end with a letter or number: $username"
+        log_error "Cannot end with: . _ -"
         return 1
+    fi
+
+    # Check for consecutive special characters
+    if echo "$username" | grep -qE '[._-]{2,}'; then
+        log_error "Username cannot have consecutive special characters: $username"
+        log_error "Examples of invalid patterns: .. __ -- ._ -."
+        return 1
+    fi
+
+    # Check for directory traversal patterns (belt and suspenders)
+    if echo "$username" | grep -q '\.\.'; then
+        log_error "Username cannot contain '..' pattern for security reasons"
+        return 1
+    fi
+
+    # Check for reserved system usernames
+    case "$username" in
+        "root"|"admin"|"administrator"|"system"|"daemon"|"bin"|"sys"|"sync"|"games"|"man"|"lp"|"mail"|"news"|"uucp"|"proxy"|"www-data"|"backup"|"list"|"irc"|"gnats"|"nobody"|"systemd-network"|"systemd-resolve"|"messagebus"|"systemd-timesync"|"syslog"|"_apt"|"tss"|"uuidd"|"tcpdump"|"sshd"|"landscape"|"pollinate"|"ec2-instance-connect"|"systemd-coredump"|"ubuntu"|"lxd"|"dnsmasq"|"libvirt-qemu"|"libvirt-dnsmasq"|"guest"|"user"|"test"|"demo"|"temp"|"tmp"|"null"|"void"|"default")
+            log_error "Username is reserved: $username"
+            log_error "Please choose a different username (avoid common system names)"
+            return 1
+            ;;
+    esac
+
+    # Additional checks for common problematic patterns
+    if echo "$username" | grep -qiE '^(con|prn|aux|nul|com[1-9]|lpt[1-9])$'; then
+        log_error "Username conflicts with Windows reserved names: $username"
+        log_error "Please choose a different username"
+        return 1
+    fi
+
+    # Check for all numbers (could be confusing)
+    if echo "$username" | grep -qE '^[0-9]+$'; then
+        log_warning "Username is all numbers: $username (consider adding letters for clarity)"
     fi
 
     return 0
