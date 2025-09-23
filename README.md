@@ -28,9 +28,10 @@ A robust bash script to automate WireGuard user/peer creation with comprehensive
 
 ## 🔧 Installation
 
-1. **Download the script:**
+1. **Clone the repository:**
    ```bash
-   wget https://raw.githubusercontent.com/yourusername/wireguard-gen/main/wireguard-gen.sh
+   git clone https://github.com/DiegoSpinola/wireguard-gen.git
+   cd wireguard-gen
    chmod +x wireguard-gen.sh
    ```
 
@@ -69,6 +70,7 @@ sudo ./wireguard-gen.sh -c CONFIG_NAME -u USER_NAME -i CLIENT_IP -o OUTPUT_DIR [
 - `-d DNS_SERVERS` - Custom DNS servers (DNS disabled by default)
 - `-a ALLOWED_IPS` - Allowed IPs for client (default: '0.0.0.0/0, ::/0')
 - `-k KEEPALIVE` - PersistentKeepalive seconds (default: 25, use 0 to disable)
+- `-m MTU` - MTU size for client interface (default: 1360)
 - `-b BACKUP_DIR` - Custom backup directory (default: ~/wireguardbk/)
 - `-D` - Enable DNS with default servers (1.1.1.1, 1.0.0.1)
 - `-q` - Show QR code installation instructions if qrencode missing
@@ -102,22 +104,42 @@ sudo ./wireguard-gen.sh -c wg0 -u alice -i 10.252.1.103/32 -o ~/wireguard-client
 # Custom keepalive and backup location
 sudo ./wireguard-gen.sh -c wg0 -u charlie -i 10.252.1.104/32 -o ~/wireguard-clients \
   -k 60 -b /backup/wireguard
+
+# Custom MTU for specific network requirements
+sudo ./wireguard-gen.sh -c wg0 -u mobile -i 10.252.1.105/32 -o ~/wireguard-clients \
+  -m 1280
 ```
 
 ## 📁 File Organization
 
 The script creates an organized directory structure:
 
+**Backup Directory:**
 ```
 ~/wireguardbk/                    (or custom backup directory)
-├── server-configs/               # Timestamped server config backups
-│   └── wg0.conf.20240322_143022.backup
-└── peers/                        # Client configurations and QR codes
-    ├── john_doe.conf            # Client config (mode 600)
-    └── john_doe.png             # QR code for mobile import
+└── server-configs/               # Timestamped server config backups
+    └── wg0.conf.20240322_143022.backup
+```
+
+**Output Directory (specified with -o):**
+```
+~/wireguard-clients/              (or your specified output directory)
+├── john_doe.conf                # Client config (mode 600)
+├── john_doe.png                 # QR code for mobile import
+├── jane_doe.conf
+└── jane_doe.png
 ```
 
 ## 🔒 Security Features
+
+### Input Validation
+- **Path traversal prevention** - Blocks malicious paths with '..' patterns
+- **Username sanitization** - Only alphanumeric and safe punctuation (._-)
+- **IP address validation** - Comprehensive IPv4 format and CIDR checking
+- **Reserved IP detection** - Blocks loopback, multicast, and reserved ranges
+- **Server endpoint validation** - Verifies hostname/IP and port format
+- **MTU validation** - Enforces valid range (576-9000)
+- **Filename safety** - Path length limits and overwrite warnings
 
 ### Configuration Validation
 - **Pre-modification validation** - Checks existing config before changes
@@ -141,6 +163,7 @@ The script uses sensible defaults:
 - **DNS**: Disabled (no DNS servers added to client config)
 - **Keepalive**: 25 seconds (good for most NAT situations)
 - **Allowed IPs**: 0.0.0.0/0, ::/0 (full tunnel)
+- **MTU**: 1360 (optimal for most networks)
 - **Backup location**: ~/wireguardbk/
 - **Base64 padding**: Automatically fixed for malformed keys
 
