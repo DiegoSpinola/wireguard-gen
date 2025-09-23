@@ -202,6 +202,7 @@ Optional Arguments:
   -d DNS_SERVERS      DNS servers for the client (by default DNS is not configured)
   -a ALLOWED_IPS      Allowed IPs for the client (default: '0.0.0.0/0, ::/0')
   -k KEEPALIVE        PersistentKeepalive value in seconds (default: 25, use 0 to disable)
+  -m MTU              MTU size for the client interface (default: 1360)
   -b BACKUP_DIR       Custom backup directory (default: ~/wireguardbk/)
   -D                  Enable DNS with default servers (1.1.1.1, 1.0.0.1)
   -q                  Generate QR code even if qrencode needs to be installed
@@ -224,6 +225,9 @@ Examples:
   # Custom keepalive and backup directory
   $SCRIPT_NAME -c wg0 -u alice -i 10.0.0.8/32 -o /home/admin/wg-clients -k 60 -b /backup/wireguard
 
+  # Custom MTU for networks with smaller packet sizes
+  $SCRIPT_NAME -c wg0 -u mobile_user -i 10.0.0.10/32 -o /home/admin/wg-clients -m 1280
+
   # Check dependencies without running
   $SCRIPT_NAME -C
 
@@ -239,12 +243,13 @@ SERVER_ENDPOINT=""
 DNS_SERVERS=""
 ALLOWED_IPS="0.0.0.0/0, ::/0"
 KEEPALIVE="25"
+MTU="1360"
 BACKUP_DIR="${HOME}/wireguardbk"
 NO_DNS=true
 FORCE_QR=false
 CHECK_DEPS=false
 
-while getopts "c:u:i:o:e:d:a:k:b:DqCh" opt; do
+while getopts "c:u:i:o:e:d:a:k:m:b:DqCh" opt; do
     case ${opt} in
         c )
             CONFIG_NAME="$OPTARG"
@@ -270,6 +275,9 @@ while getopts "c:u:i:o:e:d:a:k:b:DqCh" opt; do
             ;;
         k )
             KEEPALIVE="$OPTARG"
+            ;;
+        m )
+            MTU="$OPTARG"
             ;;
         b )
             BACKUP_DIR="$OPTARG"
@@ -624,6 +632,56 @@ validate_output_paths() {
     return 0
 }
 
+# Validate MTU value
+validate_mtu() {
+    local mtu="$1"
+
+    # MTU is optional, return success if not provided
+    if [ -z "$mtu" ]; then
+        return 0
+    fi
+
+    # Check if MTU is numeric
+    if ! echo "$mtu" | grep -qE '^[0-9]+$'; then
+        log_error "MTU must be a numeric value: $mtu"
+        return 1
+    fi
+
+    # Check MTU range (typical minimum is 68 for IPv4, practical minimum 576)
+    if [ "$mtu" -lt 576 ]; then
+        log_error "MTU too small: $mtu (minimum recommended: 576)"
+        return 1
+    fi
+
+    # Check MTU maximum (typical Ethernet maximum is 1500, jumbo frames up to 9000)
+    if [ "$mtu" -gt 9000 ]; then
+        log_error "MTU too large: $mtu (maximum supported: 9000)"
+        return 1
+    fi
+
+    # Warn about common problematic MTU values
+    if [ "$mtu" -gt 1500 ]; then
+        log_warning "MTU $mtu is larger than standard Ethernet (1500) - ensure your network supports this"
+    elif [ "$mtu" -lt 1280 ]; then
+        log_warning "MTU $mtu is quite small and may cause fragmentation issues"
+    fi
+
+    # Common MTU values and their use cases (informational)
+    case "$mtu" in
+        1500)
+            log_info "Using standard Ethernet MTU: $mtu"
+            ;;
+        1420)
+            log_info "Using common WireGuard MTU: $mtu (good for most networks)"
+            ;;
+        1280)
+            log_info "Using IPv6 minimum MTU: $mtu (conservative choice)"
+            ;;
+    esac
+
+    return 0
+}
+
 # Comprehensive input validation function that coordinates all validations
 validate_all_inputs() {
     local config_name="$1"
@@ -631,6 +689,7 @@ validate_all_inputs() {
     local client_ip="$3"
     local output_dir="$4"
     local server_endpoint="$5"
+    local mtu="$6"
 
     log_info "Performing comprehensive input validation..."
 
@@ -691,6 +750,13 @@ validate_all_inputs() {
         fi
     fi
 
+    # Validate MTU if provided
+    if [ -n "$mtu" ]; then
+        if ! validate_mtu "$mtu"; then
+            validation_errors=$((validation_errors + 1))
+        fi
+    fi
+
     # Summary
     if [ $validation_errors -eq 0 ]; then
         log_success "All input validations passed!"
@@ -703,7 +769,7 @@ validate_all_inputs() {
 }
 
 # Perform comprehensive input validation
-if ! validate_all_inputs "$CONFIG_NAME" "$USER_NAME" "$CLIENT_IP" "$OUTPUT_DIR" "$SERVER_ENDPOINT"; then
+if ! validate_all_inputs "$CONFIG_NAME" "$USER_NAME" "$CLIENT_IP" "$OUTPUT_DIR" "$SERVER_ENDPOINT" "$MTU"; then
     exit 1
 fi
 
@@ -728,6 +794,7 @@ else
 fi
 log_info "Allowed IPs: ${ALLOWED_IPS}"
 log_info "Keepalive: ${KEEPALIVE} seconds"
+log_info "MTU: ${MTU}"
 if [ -n "$SERVER_ENDPOINT" ]; then
     log_info "Server Endpoint: ${SERVER_ENDPOINT}"
 fi
@@ -863,6 +930,7 @@ if [ "$NO_DNS" = true ]; then
 [Interface]
 PrivateKey = ${CLIENT_PRIVATE_KEY}
 Address = ${CLIENT_IP}
+MTU = ${MTU}
 
 [Peer]
 PublicKey = ${SERVER_PUBLIC_KEY}
@@ -876,6 +944,7 @@ else
 PrivateKey = ${CLIENT_PRIVATE_KEY}
 Address = ${CLIENT_IP}
 DNS = ${DNS_SERVERS}
+MTU = ${MTU}
 
 [Peer]
 PublicKey = ${SERVER_PUBLIC_KEY}
